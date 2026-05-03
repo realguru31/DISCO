@@ -141,7 +141,7 @@ def kget(kpis: dict, frag: str, key: str = "v") -> str:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_ohlcv(ticker: str) -> list:
-    """Fetch daily OHLCV via tvDatafeed (TradingView data, works in Streamlit)."""
+    """Fetch daily OHLCV via tvDatafeed (rongardF fork — works on Streamlit Cloud)."""
     try:
         from tvDatafeed import TvDatafeed, Interval
         parts    = ticker.split(":")
@@ -154,13 +154,11 @@ def get_ohlcv(ticker: str) -> list:
             return []
         df = df.sort_index()
         return [
-            {
-                "time":  int(ts.timestamp()),
-                "open":  round(float(row["open"]),  4),
-                "high":  round(float(row["high"]),  4),
-                "low":   round(float(row["low"]),   4),
-                "close": round(float(row["close"]), 4),
-            }
+            {"time":  int(ts.timestamp()),
+             "open":  round(float(row["open"]),  4),
+             "high":  round(float(row["high"]),  4),
+             "low":   round(float(row["low"]),   4),
+             "close": round(float(row["close"]), 4)}
             for ts, row in df.iterrows()
         ]
     except Exception:
