@@ -439,246 +439,265 @@ def render_risk_params(kpis: dict):
 
 
 # ══════════════════════════════════════════════════════════════════
-# POSITIONS TABLE  — clickable HTML rows + hidden radio state bridge
+# TABLE + CHART  — single component, Lightweight Charts, no radio hacks
 # ══════════════════════════════════════════════════════════════════
-def render_table(positions: list, selected_ticker: str | None, theme: str = "dark"):
+def render_panel(positions: list, theme: str = "dark", height: int = 700):
+    """
+    One components.html block containing:
+      - clickable positions table (left pane)
+      - Lightweight Charts candlestick chart (right pane)
+    Row clicks directly call loadChart() in the same JS scope.
+    OHLCV data fetched browser-side from Yahoo Finance (no CORS on HTTPS).
+    SMAs and price lines rendered natively by Lightweight Charts.
+    """
+    import json as _json
     if not positions:
-        st.info("No positions found in the sheet.")
-        return None
-
-    def _ret_pct(p):
-        ep, cp = p.get("Entry Px"), p.get("Curr Px")
-        if ep and cp and ep != 0:
-            pct = (cp - ep) / ep * 100
-            return (f"+{pct:.2f}%" if pct >= 0 else f"{pct:.2f}%"), pct
-        return "—", 0.0
-
-    def _px(v): return f"{v:.2f}" if v is not None else "—"
-
-    tickers = [p["Ticker"] for p in positions]
-    def_idx = tickers.index(selected_ticker) if selected_ticker in tickers else 0
-
-    # Hidden radio — Streamlit state bridge (invisible, clicked by JS)
-    chosen = st.radio("sel", tickers, index=def_idx,
-                      key="ticker_radio", label_visibility="collapsed")
-
-    # Theme-resolved colours (CSS vars don't work inside st.html iframe)
-    d = theme == "dark"
-    t_bg      = "#07090f"  if d else "#f4f6f9"
-    t_bdr     = "#1a2333"  if d else "#dde3ec"
-    t_hdr_col = "#526a85"  if d else "#94a3b8"
-    t_txt     = "#d0dae6"  if d else "#1e293b"   # bright enough in dark
-    t_acc     = "#00d4ff"  if d else "#0059b3"
-    t_sel_bg  = "#111827"  if d else "#eef2f7"
-
-    # Build themed table rows
-    rows_html = ""
-    for p in positions:
-        ret_str, ret_val = _ret_pct(p)
-        is_sel  = p["Ticker"] == (chosen or selected_ticker)
-        row_bg  = ("rgba(30,144,255,0.07)" if ret_val > 0 else
-                   "rgba(255,0,255,0.07)"  if ret_val < 0 else "transparent")
-        ret_col = ("#1E90FF" if ret_val > 0 else
-                   "#FF00FF" if ret_val < 0 else t_txt)
-        sel_style = (f"border-left:3px solid {t_acc};background:{t_sel_bg};"
-                     if is_sel else "border-left:3px solid transparent;")
-        dot = "●&nbsp;" if is_sel else "&nbsp;&nbsp;&nbsp;"
-        tk_col = t_acc if is_sel else t_txt
-        rows_html += (
-            f'<tr onclick="selectTicker(\'{p["Ticker"]}\')" ' +
-            f'style="cursor:pointer;background:{row_bg};{sel_style}">' +
-            f'<td style="color:{tk_col};font-weight:600;">{dot}{p["Ticker"]}</td>' +
-            f'<td>{int(p["Shares"]) if p["Shares"] else "—"}</td>' +
-            f'<td>{_px(p["Entry Px"])}</td>' +
-            f'<td>{p["Entry Date"]}</td>' +
-            f'<td>{_px(p["Stop Px"])}</td>' +
-            f'<td>{_px(p["Curr Px"])}</td>' +
-            f'<td style="color:{ret_col};font-weight:700;">{ret_str}</td>' +
-            f'</tr>'
-        )
-
-    table_html = f"""
-<style>
-  body{{background:{t_bg};margin:0;padding:0;}}
-  .dt{{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:13px;}}
-  .dt th{{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
-    padding:9px 12px;border-bottom:2px solid {t_bdr};text-align:right;color:{t_hdr_col};}}
-  .dt th:first-child{{text-align:left;}}
-  .dt td{{padding:10px 12px;border-bottom:1px solid {t_bdr};text-align:right;color:{t_txt};}}
-  .dt td:first-child{{text-align:left;}}
-  .dt tr:hover td{{filter:brightness(1.2);}}
-</style>
-<table class="dt">
-  <thead><tr>
-    <th>Ticker</th><th>Shares</th><th>Entry Px</th>
-    <th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>Return %</th>
-  </tr></thead>
-  <tbody>{rows_html}</tbody>
-</table>
-<script>
-function selectTicker(ticker) {{
-  try {{
-    var radios = window.parent.document.querySelectorAll('[data-testid="stRadio"] input[type="radio"]');
-    for (var i = 0; i < radios.length; i++) {{
-      if (radios[i].value === ticker) {{
-        radios[i].click();
-        return;
-      }}
-    }}
-    // Fallback: click the label
-    var labels = window.parent.document.querySelectorAll('[data-testid="stRadio"] label');
-    for (var j = 0; j < labels.length; j++) {{
-      if (labels[j].innerText.trim() === ticker) {{
-        labels[j].click();
-        return;
-      }}
-    }}
-  }} catch(e) {{}}
-}}
-</script>"""
-
-    row_h = 42
-    table_height = 38 + 36 + len(positions) * row_h + 8  # header + thead + rows + pad
-    components.html(table_html, height=table_height, scrolling=False)
-
-    for p in positions:
-        if p["Ticker"] == chosen:
-            return p
-    return positions[0]
-
-
-
-# ══════════════════════════════════════════════════════════════════
-# TRADINGVIEW CHART
-# ══════════════════════════════════════════════════════════════════
-def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
-    tv_theme   = "dark" if theme == "dark" else "light"
-    sma200_col = "#FFFFFF" if theme == "dark" else "#000000"
-    d          = theme == "dark"
-    bg         = "#0c1018"  if d else "#ffffff"
-    hdr_bdr    = "#1a2333"  if d else "#e2e8f0"
-    txt_hi     = "#f0f6ff"  if d else "#0f172a"
-    txt_dim    = "#8fa3bc"  if d else "#64748b"
-    buy_bg     = "rgba(0,230,118,.12)"   if d else "rgba(21,128,61,.10)"
-    buy_col    = "#00e676"  if d else "#15803d"
-    buy_bdr    = "rgba(0,230,118,.3)"    if d else "rgba(21,128,61,.25)"
-    stp_bg     = "rgba(255,0,255,.08)"
-    stp_col    = "#FF00FF"
-    stp_bdr    = "rgba(255,0,255,.3)"
-
-    if not ticker:
-        ph_bg  = "#0c1018" if d else "#f8fafc"
-        ph_col = "#526a85" if d else "#94a3b8"
-        components.html(
-            f'<div style="height:{height}px;display:flex;align-items:center;'
-            f'justify-content:center;background:{ph_bg};border-radius:8px;">'
-            f'<div style="text-align:center;">'
-            f'<div style="font-size:40px;opacity:.18;">📈</div>'
-            f'<div style="font-size:14px;color:{ph_col};margin-top:14px;'
-            f'font-family:Inter,sans-serif;letter-spacing:.5px;">'
-            f'Select a position to view chart</div></div></div>',
-            height=height + 4,
-        )
+        st.info("No positions found.")
         return
 
-    buy_badge = (
-        f'<span style="background:{buy_bg};color:{buy_col};border:1px solid {buy_bdr};'
-        f'padding:4px 12px;border-radius:5px;font-size:12px;font-weight:600;">'
-        f'● BUY &nbsp;{buy_px:.2f}</span>'
-        if buy_px else ""
-    )
-    stop_badge = (
-        f'<span style="background:{stp_bg};color:{stp_col};border:1px solid {stp_bdr};'
-        f'padding:4px 12px;border-radius:5px;font-size:12px;font-weight:600;">'
-        f'● STOP &nbsp;{stop_px:.2f}</span>'
-        if stop_px else ""
-    )
+    d          = theme == "dark"
+    t_bg       = "#07090f" if d else "#f4f6f9"
+    t_surface  = "#0c1018" if d else "#ffffff"
+    t_bdr      = "#1a2333" if d else "#dde3ec"
+    t_hdr_col  = "#526a85" if d else "#94a3b8"
+    t_txt      = "#d0dae6" if d else "#1e293b"
+    t_acc      = "#00d4ff" if d else "#0059b3"
+    t_sel_bg   = "#111827" if d else "#eef2f7"
+    chart_bg   = "#07090f" if d else "#ffffff"
+    chart_txt  = "#7a8fa6" if d else "#374151"
+    chart_grid = "rgba(26,35,51,.7)" if d else "rgba(220,225,232,.8)"
+    chart_bdr  = "#1a2333" if d else "#e5e7eb"
+    sma200_col = "#FFFFFF" if d else "#000000"
 
-    # ── Build JS separately to avoid f-string brace hell ──────────────
-    buy_line = ""
-    if buy_px:
-        buy_line = (
-            "chart.createPositionLine()"
-            f".setPrice({buy_px})"
-            f'.setText("BUY  {buy_px:.2f}")'
-            '.setLineColor("#00e676")'
-            ".setLineLength(50)"
-            ".setLineStyle(0)"
-            '.setBodyTextColor("#00e676")'
-            '.setBodyBorderColor("rgba(0,230,118,0.4)")'
-            '.setBodyBackgroundColor("rgba(0,230,118,0.08)")'
-            '.setQuantityBackgroundColor("transparent")'
-            '.setQuantityBorderColor("transparent")'
-            '.setQuantityTextColor("transparent");'
-        )
-    stop_line = ""
-    if stop_px:
-        stop_line = (
-            "chart.createPositionLine()"
-            f".setPrice({stop_px})"
-            f'.setText("STOP  {stop_px:.2f}")'
-            '.setLineColor("#FF00FF")'
-            ".setLineLength(50)"
-            ".setLineStyle(2)"
-            '.setBodyTextColor("#FF00FF")'
-            '.setBodyBorderColor("rgba(255,0,255,0.4)")'
-            '.setBodyBackgroundColor("rgba(255,0,255,0.08)")'
-            '.setQuantityBackgroundColor("transparent")'
-            '.setQuantityBorderColor("transparent")'
-            '.setQuantityTextColor("transparent");'
-        )
+    pos_js = _json.dumps(positions, default=str)
+    tbl_h  = 38 + 44 * len(positions) + 20       # approx px for table
+    comp_h = max(height, tbl_h + 60)
 
-    js = (
-        "var widget = new TradingView.widget({"
-        f'  container_id:"tvc_chart", autosize:true,'
-        f'  symbol:"{ticker}", interval:"D", timezone:"Etc/UTC",'
-        f'  theme:"{tv_theme}", style:"1", locale:"en",'
-        "  enable_publishing:false, allow_symbol_change:false,"
-        "  hide_side_toolbar:false, withdateranges:true, save_image:true,"
-        "  studies:["
-        '    "Volume@tv-basicstudies",'
-        '    {id:"MASimple@tv-basicstudies", inputs:{length:50},'
-        f'     overrides:{{"Plot.color":"#1565C0","Plot.linewidth":2}}}},'
-        '    {id:"MASimple@tv-basicstudies", inputs:{length:200},'
-        f'     overrides:{{"Plot.color":"{sma200_col}","Plot.linewidth":1.5}}}}'
-        "  ],"
-        "  overrides:{"
-        '    "mainSeriesProperties.candleStyle.upColor":         "rgba(30,144,255,0.6)",'
-        '    "mainSeriesProperties.candleStyle.downColor":       "rgba(255,0,255,0.6)",'
-        '    "mainSeriesProperties.candleStyle.borderUpColor":   "rgba(30,144,255,0.85)",'
-        '    "mainSeriesProperties.candleStyle.borderDownColor": "rgba(255,0,255,0.85)",'
-        '    "mainSeriesProperties.candleStyle.wickUpColor":     "rgba(30,144,255,0.70)",'
-        '    "mainSeriesProperties.candleStyle.wickDownColor":   "rgba(255,0,255,0.70)"'
-        "  }"
-        "});"
-        "widget.onChartReady(function() {"
-        "  var chart = widget.chart();"
-        + buy_line
-        + stop_line
-        + "});"
-    )
-
-    html = f"""
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Syne:wght@800&display=swap" rel="stylesheet">
-<div style="font-family:'JetBrains Mono',monospace;font-size:13px;
-  padding:10px 16px 9px;background:{bg};display:flex;align-items:center;gap:12px;
-  border-bottom:1px solid {hdr_bdr};">
-  <span style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;
-    color:{txt_hi};">{ticker}</span>
-  {buy_badge}
-  {stop_badge}
-  <span style="margin-left:auto;font-size:11px;color:{txt_dim};font-family:'Inter',sans-serif;">
-    Daily &nbsp;·&nbsp;
-    <span style="color:#1565C0;font-size:14px;">━</span> SMA 50 &nbsp;·&nbsp;
-    <span style="color:{sma200_col};font-size:14px;">━</span> SMA 200 &nbsp;·&nbsp;
-    <span style="color:rgba(30,144,255,.85);">▲</span> Dodger Blue &nbsp;·&nbsp;
-    <span style="color:rgba(255,0,255,.85);">▼</span> Magenta
-  </span>
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@800&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+html,body{{height:100%;background:{t_bg};color:{t_txt};font-family:'JetBrains Mono',monospace;font-size:13px;overflow:hidden;}}
+.wrap{{display:flex;height:{comp_h}px;}}
+/* ── TABLE ── */
+.tbl-panel{{width:390px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid {t_bdr};}}
+.tbl-label{{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+  color:{t_hdr_col};padding:7px 12px;background:{t_surface};border-bottom:1px solid {t_bdr};flex-shrink:0;}}
+.tbl-wrap{{overflow-y:auto;flex:1;}}
+table{{width:100%;border-collapse:collapse;white-space:nowrap;}}
+thead th{{position:sticky;top:0;z-index:5;background:{t_surface};
+  font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+  padding:7px 9px;border-bottom:2px solid {t_bdr};text-align:right;color:{t_hdr_col};}}
+thead th:first-child{{text-align:left;}}
+tbody tr{{border-bottom:1px solid {t_bdr};cursor:pointer;}}
+tbody tr:hover td{{background:rgba(0,212,255,.05);}}
+tbody tr.sel{{border-left:3px solid {t_acc};}}
+tbody tr.sel td{{background:{t_sel_bg};}}
+td{{padding:9px 9px;text-align:right;color:{t_txt};}}
+td:first-child{{text-align:left;font-weight:600;color:{t_acc};}}
+.rp{{color:#1E90FF;font-weight:700;}}
+.rn{{color:#FF00FF;font-weight:700;}}
+/* ── CHART ── */
+.chart-panel{{flex:1;display:flex;flex-direction:column;min-width:0;}}
+.chart-hdr{{flex-shrink:0;background:{t_surface};border-bottom:1px solid {t_bdr};
+  padding:7px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:42px;}}
+.ct{{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:{t_txt};}}
+.bb{{padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;display:none;}}
+.buy-b{{background:rgba(0,230,118,.10);color:#00e676;border:1px solid rgba(0,230,118,.3);}}
+.stp-b{{background:rgba(255,0,255,.08);color:#FF00FF;border:1px solid rgba(255,0,255,.3);}}
+.leg{{margin-left:auto;font-size:10px;color:{t_hdr_col};text-align:right;line-height:1.7;}}
+#cc{{flex:1;position:relative;min-height:0;}}
+#ch{{position:absolute;inset:0;}}
+.ph{{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:10px;color:{t_hdr_col};font-size:13px;letter-spacing:.3px;opacity:.7;}}
+::-webkit-scrollbar{{width:3px;}}.wrap::-webkit-scrollbar{{display:none;}}
+::-webkit-scrollbar-thumb{{background:{t_bdr};border-radius:2px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="tbl-panel">
+  <div class="tbl-label">Open Positions — click any row to chart →</div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Ticker</th><th>Shares</th><th>Entry Px</th><th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>Return</th></tr></thead>
+    <tbody id="tbl"></tbody>
+  </table></div>
 </div>
-<div id="tvc_chart" style="width:100%;height:{height - 44}px;"></div>
-<script src="https://s3.tradingview.com/tv.js"></script>
-<script>{js}</script>"""
-    components.html(html, height=height + 4)
+<div class="chart-panel">
+  <div class="chart-hdr">
+    <span class="ct" id="ct">—</span>
+    <span class="bb buy-b" id="bb"></span>
+    <span class="bb stp-b" id="bs"></span>
+    <div class="leg">
+      Daily &nbsp;·&nbsp;
+      <span style="color:#1565C0;font-size:13px;">━</span> SMA 50 &nbsp;·&nbsp;
+      <span style="color:{sma200_col};font-size:13px;">━</span> SMA 200 &nbsp;·&nbsp;
+      <span style="color:rgba(30,144,255,.9);">▲</span> Blue &nbsp;·&nbsp;
+      <span style="color:rgba(255,0,255,.9);">▼</span> Magenta
+    </div>
+  </div>
+  <div id="cc">
+    <div id="ch"></div>
+    <div class="ph" id="ph">📈&nbsp;&nbsp;Select a position to view chart</div>
+  </div>
+</div>
+</div>
+
+<script>
+// ── Data injected from Python ────────────────────────────────────
+const POSITIONS  = {pos_js};
+const CHART_BG   = "{chart_bg}";
+const CHART_TXT  = "{chart_txt}";
+const CHART_GRID = "{chart_grid}";
+const CHART_BDR  = "{chart_bdr}";
+const SMA200     = "{sma200_col}";
+
+// ── Build table ──────────────────────────────────────────────────
+let selIdx = 0;
+
+function retPct(p) {{
+  const ep = p["Entry Px"], cp = p["Curr Px"];
+  if (!ep || !cp || ep === 0) return ["—", 0];
+  const pct = (cp - ep) / ep * 100;
+  return [(pct >= 0 ? "+" : "") + pct.toFixed(2) + "%", pct];
+}}
+
+function px(v) {{ return v != null ? (+v).toFixed(2) : "—"; }}
+
+function buildTable() {{
+  const tbody = document.getElementById("tbl");
+  POSITIONS.forEach((p, i) => {{
+    const [rs, rv] = retPct(p);
+    const tr = document.createElement("tr");
+    tr.className = i === 0 ? "sel" : "";
+    tr.innerHTML =
+      `<td>${{p["Ticker"]}}</td>` +
+      `<td>${{p["Shares"] != null ? Math.round(p["Shares"]) : "—"}}</td>` +
+      `<td>${{px(p["Entry Px"])}}</td>` +
+      `<td>${{p["Entry Date"] || "—"}}</td>` +
+      `<td>${{px(p["Stop Px"])}}</td>` +
+      `<td>${{px(p["Curr Px"])}}</td>` +
+      `<td class="${{rv > 0 ? "rp" : rv < 0 ? "rn" : ""}}">${{rs}}</td>`;
+    tr.onclick = () => selectRow(i, tr);
+    tbody.appendChild(tr);
+  }});
+}}
+
+function selectRow(i, tr) {{
+  document.querySelectorAll("#tbl tr").forEach(r => r.classList.remove("sel"));
+  tr.classList.add("sel");
+  selIdx = i;
+  const p = POSITIONS[i];
+  loadChart(p["Ticker"], p["Entry Px"], p["Stop Px"]);
+}}
+
+// ── Lightweight Charts ───────────────────────────────────────────
+let chartObj = null, resizeObs = null;
+
+function calcSMA(data, period) {{
+  const out = [];
+  for (let i = period - 1; i < data.length; i++) {{
+    let s = 0;
+    for (let j = i - period + 1; j <= i; j++) s += data[j].close;
+    out.push({{ time: data[i].time, value: +(s / period).toFixed(4) }});
+  }}
+  return out;
+}}
+
+async function loadChart(ticker, buyPx, stopPx) {{
+  // Update header
+  document.getElementById("ct").textContent = ticker;
+  const bb = document.getElementById("bb"), bs = document.getElementById("bs");
+  if (buyPx != null) {{ bb.textContent = "● BUY  " + (+buyPx).toFixed(2); bb.style.display = "inline"; }}
+  else bb.style.display = "none";
+  if (stopPx != null) {{ bs.textContent = "● STOP  " + (+stopPx).toFixed(2); bs.style.display = "inline"; }}
+  else bs.style.display = "none";
+  document.getElementById("ph").style.display = "none";
+
+  // Tear down old chart
+  const cc = document.getElementById("ch");
+  cc.innerHTML = "";
+  if (resizeObs) {{ resizeObs.disconnect(); resizeObs = null; }}
+  if (chartObj)  {{ try {{ chartObj.remove(); }} catch(e){{}} chartObj = null; }}
+
+  // Create chart
+  const container = document.getElementById("cc");
+  const chart = LightweightCharts.createChart(cc, {{
+    width:  container.clientWidth,
+    height: container.clientHeight,
+    layout: {{ background: {{ color: CHART_BG }}, textColor: CHART_TXT }},
+    grid:   {{ vertLines: {{ color: CHART_GRID }}, horzLines: {{ color: CHART_GRID }} }},
+    crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
+    rightPriceScale: {{ borderColor: CHART_BDR }},
+    timeScale: {{ borderColor: CHART_BDR, timeVisible: true }},
+  }});
+  chartObj = chart;
+
+  const candles = chart.addCandlestickSeries({{
+    upColor: "rgba(30,144,255,0.60)", downColor: "rgba(255,0,255,0.60)",
+    borderUpColor: "rgba(30,144,255,0.85)", borderDownColor: "rgba(255,0,255,0.85)",
+    wickUpColor: "rgba(30,144,255,0.70)", wickDownColor: "rgba(255,0,255,0.70)",
+  }});
+  const sma50s = chart.addLineSeries({{
+    color: "#1565C0", lineWidth: 1.5, title: "SMA 50",
+    priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
+  }});
+  const sma200s = chart.addLineSeries({{
+    color: SMA200, lineWidth: 1.5, title: "SMA 200",
+    priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
+  }});
+
+  // Fetch OHLCV — Yahoo Finance direct (no CORS issues on HTTPS)
+  try {{
+    const sym = ticker.includes(":") ? ticker.split(":")[1] : ticker;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${{sym}}?interval=1d&range=2y`;
+    const res = await fetch(url);
+    const js  = await res.json();
+    const r   = js.chart.result[0];
+    const ts  = r.timestamp;
+    const q   = r.indicators.quote[0];
+
+    const ohlcv = ts.map((t, i) => ({{
+      time: t,
+      open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
+    }})).filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
+       .sort((a, b) => a.time - b.time);
+
+    candles.setData(ohlcv);
+    sma50s.setData(calcSMA(ohlcv, 50));
+    sma200s.setData(calcSMA(ohlcv, 200));
+
+    if (buyPx != null)  candles.createPriceLine({{ price: +buyPx,  color: "#00e676", lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "BUY" }});
+    if (stopPx != null) candles.createPriceLine({{ price: +stopPx, color: "#FF00FF", lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "STOP" }});
+
+    chart.timeScale().fitContent();
+
+  }} catch(e) {{
+    cc.innerHTML = `<div class="ph">⚠ Chart unavailable for ${{ticker}}<br><small style="font-size:10px;">${{e.message}}</small></div>`;
+  }}
+
+  resizeObs = new ResizeObserver(() => {{
+    const c = document.getElementById("cc");
+    chart.resize(c.clientWidth, c.clientHeight);
+  }});
+  resizeObs.observe(container);
+}}
+
+// ── Init ─────────────────────────────────────────────────────────
+buildTable();
+if (POSITIONS.length > 0) {{
+  const p = POSITIONS[0];
+  loadChart(p["Ticker"], p["Entry Px"], p["Stop Px"]);
+}}
+</script>
+</body></html>"""
+
+    components.html(html, height=comp_h + 4, scrolling=False)
+
 
 # ══════════════════════════════════════════════════════════════════
 # MAIN
@@ -757,34 +776,8 @@ def main():
 
     st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
 
-    # ── Auto-select first position if nothing yet chosen
-    if positions and st.session_state.ticker is None:
-        st.session_state.ticker  = positions[0]["Ticker"]
-        st.session_state.buy_px  = positions[0]["Entry Px"]
-        st.session_state.stop_px = positions[0]["Stop Px"]
-
-    # ── MAIN SPLIT: table left, chart right
-    left, right = st.columns([5, 6], gap="small")
-
-    with left:
-        st.markdown('<div style="padding:0 4px 0 18px;">', unsafe_allow_html=True)
-        selected = render_table(positions, st.session_state.ticker, theme)
-        if selected:
-            if selected["Ticker"] != st.session_state.ticker:
-                st.session_state.ticker  = selected["Ticker"]
-                st.session_state.buy_px  = selected["Entry Px"]
-                st.session_state.stop_px = selected["Stop Px"]
-                st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with right:
-        render_chart(
-            ticker  = st.session_state.ticker,
-            buy_px  = st.session_state.buy_px,
-            stop_px = st.session_state.stop_px,
-            theme   = theme,
-            height  = 700,
-        )
+    # ── TABLE + CHART (single self-contained component)
+    render_panel(positions, theme=theme, height=700)
 
 
 main()
