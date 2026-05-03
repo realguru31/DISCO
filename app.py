@@ -13,6 +13,11 @@ from datetime import datetime
 
 # Suppress Streamlit components deprecation until official migration path is available
 warnings.filterwarnings("ignore", message=".*st.components.v1.html.*")
+warnings.filterwarnings("ignore", category=SyntaxWarning)
+warnings.filterwarnings("ignore", message=".*nologin.*")
+warnings.filterwarnings("ignore", message=".*uv.*")
+import logging
+logging.getLogger("tvDatafeed").setLevel(logging.ERROR)
 
 # ══════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -512,7 +517,7 @@ def render_panel(positions: list, ohlcv_map: dict, theme: str = "dark", height: 
 html,body{{height:100%;background:{t_bg};color:{t_txt};font-family:'JetBrains Mono',monospace;font-size:13px;overflow:hidden;}}
 .wrap{{display:flex;height:{comp_h}px;}}
 /* ── TABLE ── */
-.tbl-panel{{width:390px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid {t_bdr};}}
+.tbl-panel{{width:42%;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid {t_bdr};}}
 .tbl-label{{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
   color:{t_hdr_col};padding:7px 12px;background:{t_surface};border-bottom:1px solid {t_bdr};flex-shrink:0;}}
 .tbl-wrap{{overflow-y:auto;flex:1;}}
