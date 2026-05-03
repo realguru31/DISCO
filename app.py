@@ -2,7 +2,9 @@
 DISCO – DesiHedge Investment Strategy & Capital Opportunities
 app.py — Streamlit dashboard
 """
+import io
 import re
+import urllib.request
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -23,6 +25,7 @@ st.set_page_config(
 _DEFAULTS = dict(
     auth=False, user="", theme="dark",
     ticker=None, buy_px=None, stop_px=None,
+    refresh_count=0,
     rp_equity=10000.0, rp_win_amt=2400.0, rp_loss_amt=600.0,
     rp_win_rate=60.0, rp_kelly_frac=33.0, rp_max_risk=33.0, rp_max_lev=2.5,
 )
@@ -78,9 +81,13 @@ def parse_date(s):
 # ══════════════════════════════════════════════════════════════════
 # DATA
 # ══════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=300, show_spinner=False)
-def load_raw(url: str) -> pd.DataFrame:
-    return pd.read_csv(url, header=None, dtype=str).fillna("")
+@st.cache_data(show_spinner=False)
+def load_raw(url: str, bust: int = 0) -> pd.DataFrame:
+    """Download CSV directly then parse — no redirect/proxy issues."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        content = resp.read().decode("utf-8")
+    return pd.read_csv(io.StringIO(content), header=None, dtype=str).fillna("")
 
 
 def get_positions(raw: pd.DataFrame) -> list:
@@ -435,7 +442,7 @@ def render_risk_params(kpis: dict):
 # ══════════════════════════════════════════════════════════════════
 # POSITIONS TABLE  — clickable HTML rows + hidden radio state bridge
 # ══════════════════════════════════════════════════════════════════
-def render_table(positions: list, selected_ticker: str | None):
+def render_table(positions: list, selected_ticker: str | None, theme: str = "dark"):
     if not positions:
         st.info("No positions found in the sheet.")
         return None
@@ -456,19 +463,28 @@ def render_table(positions: list, selected_ticker: str | None):
     chosen = st.radio("sel", tickers, index=def_idx,
                       key="ticker_radio", label_visibility="collapsed")
 
+    # Theme-resolved colours (CSS vars don't work inside st.html iframe)
+    d = theme == "dark"
+    t_bg      = "#07090f"  if d else "#f4f6f9"
+    t_bdr     = "#1a2333"  if d else "#dde3ec"
+    t_hdr_col = "#526a85"  if d else "#94a3b8"
+    t_txt     = "#d0dae6"  if d else "#1e293b"   # bright enough in dark
+    t_acc     = "#00d4ff"  if d else "#0059b3"
+    t_sel_bg  = "#111827"  if d else "#eef2f7"
+
     # Build themed table rows
     rows_html = ""
     for p in positions:
         ret_str, ret_val = _ret_pct(p)
         is_sel  = p["Ticker"] == (chosen or selected_ticker)
-        row_bg  = ("rgba(30,144,255,0.06)" if ret_val > 0 else
-                   "rgba(255,0,255,0.06)"  if ret_val < 0 else "transparent")
+        row_bg  = ("rgba(30,144,255,0.07)" if ret_val > 0 else
+                   "rgba(255,0,255,0.07)"  if ret_val < 0 else "transparent")
         ret_col = ("#1E90FF" if ret_val > 0 else
-                   "#FF00FF" if ret_val < 0 else "inherit")
-        sel_style = ("border-left:3px solid var(--acc);background:var(--sf2)!important;"
+                   "#FF00FF" if ret_val < 0 else t_txt)
+        sel_style = (f"border-left:3px solid {t_acc};background:{t_sel_bg};"
                      if is_sel else "border-left:3px solid transparent;")
         dot = "●&nbsp;" if is_sel else "&nbsp;&nbsp;&nbsp;"
-        tk_col = "var(--acc)" if is_sel else "var(--txth)"
+        tk_col = t_acc if is_sel else t_txt
         rows_html += (
             f'<tr onclick="selectTicker(\'{p["Ticker"]}\')" ' +
             f'style="cursor:pointer;background:{row_bg};{sel_style}">' +
@@ -484,14 +500,14 @@ def render_table(positions: list, selected_ticker: str | None):
 
     table_html = f"""
 <style>
+  body{{background:{t_bg};margin:0;padding:0;}}
   .dt{{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:13px;}}
   .dt th{{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
-    padding:9px 12px;border-bottom:2px solid #1a2333;text-align:right;color:#526a85;}}
+    padding:9px 12px;border-bottom:2px solid {t_bdr};text-align:right;color:{t_hdr_col};}}
   .dt th:first-child{{text-align:left;}}
-  .dt td{{padding:10px 12px;border-bottom:1px solid #1a2333;text-align:right;color:#c9d1d9;}}
+  .dt td{{padding:10px 12px;border-bottom:1px solid {t_bdr};text-align:right;color:{t_txt};}}
   .dt td:first-child{{text-align:left;}}
-  .dt tr:hover td{{filter:brightness(1.15);}}
-  body{{background:transparent;margin:0;}}
+  .dt tr:hover td{{filter:brightness(1.2);}}
 </style>
 <table class="dt">
   <thead><tr>
@@ -524,7 +540,7 @@ function selectTicker(ticker) {{
 
     row_h = 42
     table_height = 38 + 36 + len(positions) * row_h + 8  # header + thead + rows + pad
-    st.html(table_html, height=table_height)
+    st.html(f'<div style="height:{table_height}px;overflow:hidden;">' + table_html + "</div>")
 
     for p in positions:
         if p["Ticker"] == chosen:
@@ -561,8 +577,7 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
             f'<div style="font-size:40px;opacity:.18;">📈</div>'
             f'<div style="font-size:14px;color:{ph_col};margin-top:14px;'
             f'font-family:Inter,sans-serif;letter-spacing:.5px;">'
-            f'Select a position to view chart</div></div></div>',
-            height=height + 4,
+            f'Select a position to view chart</div></div></div>'
         )
         return
 
@@ -663,7 +678,7 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
 <div id="tvc_chart" style="width:100%;height:{height - 44}px;"></div>
 <script src="https://s3.tradingview.com/tv.js"></script>
 <script>{js}</script>"""
-    st.html(html, height=height + 4)
+    st.html(f'<div style="height:{height+4}px;">' + html + "</div>")
 
 # ══════════════════════════════════════════════════════════════════
 # MAIN
@@ -702,7 +717,7 @@ def main():
     with hc3:
         st.markdown('<div style="padding:8px 0 0;"></div>', unsafe_allow_html=True)
         if st.button("↻ Refresh", use_container_width=True):
-            load_raw.clear()
+            st.session_state.refresh_count += 1
             st.rerun()
     with hc4:
         st.markdown(
@@ -724,7 +739,7 @@ def main():
         st.error("SHEET_URL not set in secrets.")
         return
     try:
-        raw       = load_raw(url)
+        raw       = load_raw(url, bust=st.session_state.refresh_count)
         positions = get_positions(raw)
         kpis      = get_kpis(raw)
     except Exception as e:
@@ -753,7 +768,7 @@ def main():
 
     with left:
         st.markdown('<div style="padding:0 4px 0 18px;">', unsafe_allow_html=True)
-        selected = render_table(positions, st.session_state.ticker)
+        selected = render_table(positions, st.session_state.ticker, theme)
         if selected:
             if selected["Ticker"] != st.session_state.ticker:
                 st.session_state.ticker  = selected["Ticker"]
