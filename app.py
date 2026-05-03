@@ -203,43 +203,43 @@ details .streamlit-expanderContent{{
   background:var(--sf)!important;border:1px solid var(--bdrh)!important;
   border-top:none!important;border-radius:0 0 8px 8px!important;padding:22px!important;}}
 /* Scrollbar */
-::-webkit-scrollbar{width:4px;height:4px}
-::-webkit-scrollbar-track{background:var(--bg)}
-::-webkit-scrollbar-thumb{background:var(--bdrh);border-radius:2px}
+::-webkit-scrollbar{{width:4px;height:4px}}
+::-webkit-scrollbar-track{{background:var(--bg)}}
+::-webkit-scrollbar-thumb{{background:var(--bdrh);border-radius:2px}}
 /* HTML table (theme-aware, replaces st.dataframe) */
-.disco-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;}
-.disco-table th{background:var(--sf2)!important;color:var(--txtm)!important;
+.disco-table{{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;}}
+.disco-table th{{background:var(--sf2)!important;color:var(--txtm)!important;
   font-size:10px!important;font-weight:700!important;letter-spacing:.8px!important;
   text-transform:uppercase!important;padding:9px 12px!important;
-  border-bottom:2px solid var(--bdrh)!important;text-align:right!important;}
-.disco-table th:first-child{text-align:left!important;}
-.disco-table td{padding:10px 12px!important;border-bottom:1px solid var(--bdr)!important;
-  color:var(--txth)!important;text-align:right!important;}
-.disco-table td:first-child{text-align:left!important;font-weight:600!important;
-  color:var(--acc)!important;}
-.disco-table tr:hover td{background:var(--sf2)!important;filter:brightness(1.04);}
-.disco-table tr.sel-row td{background:var(--sf2)!important;
-  border-left:3px solid var(--acc)!important;}
-.disco-table tr.pnl-pos td{background:rgba(30,144,255,0.06)!important;}
-.disco-table tr.pnl-neg td{background:rgba(255,0,255,0.06)!important;}
-.disco-table .pnl-pos-txt{color:#1E90FF!important;font-weight:700!important;}
-.disco-table .pnl-neg-txt{color:#FF00FF!important;font-weight:700!important;}
+  border-bottom:2px solid var(--bdrh)!important;text-align:right!important;}}
+.disco-table th:first-child{{text-align:left!important;}}
+.disco-table td{{padding:10px 12px!important;border-bottom:1px solid var(--bdr)!important;
+  color:var(--txth)!important;text-align:right!important;}}
+.disco-table td:first-child{{text-align:left!important;font-weight:600!important;
+  color:var(--acc)!important;}}
+.disco-table tr:hover td{{background:var(--sf2)!important;filter:brightness(1.04);}}
+.disco-table tr.sel-row td{{background:var(--sf2)!important;
+  border-left:3px solid var(--acc)!important;}}
+.disco-table tr.pnl-pos td{{background:rgba(30,144,255,0.06)!important;}}
+.disco-table tr.pnl-neg td{{background:rgba(255,0,255,0.06)!important;}}
+.disco-table .pnl-pos-txt{{color:#1E90FF!important;font-weight:700!important;}}
+.disco-table .pnl-neg-txt{{color:#FF00FF!important;font-weight:700!important;}}
 /* Radio (ticker selector) */
-div[data-testid="stRadio"]{padding:0!important;}
-div[data-testid="stRadio"] label{display:none!important;}
-div[data-testid="stRadio"] > div{gap:8px!important;}
-div[data-testid="stRadio"] > div > label{
+div[data-testid="stRadio"]{{padding:0!important;}}
+div[data-testid="stRadio"] label{{display:none!important;}}
+div[data-testid="stRadio"] > div{{gap:8px!important;}}
+div[data-testid="stRadio"] > div > label{{
   background:var(--sf2)!important;border:1px solid var(--bdr)!important;
   border-radius:6px!important;padding:6px 14px!important;
   font-family:var(--mono)!important;font-size:12px!important;font-weight:600!important;
   color:var(--txt)!important;cursor:pointer!important;display:inline-flex!important;
-  align-items:center!important;gap:6px!important;}
-div[data-testid="stRadio"] > div > label:has(input:checked){
+  align-items:center!important;gap:6px!important;}}
+div[data-testid="stRadio"] > div > label:has(input:checked){{
   background:var(--acc)!important;color:#000!important;
-  border-color:var(--acc)!important;}
-div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"]{
-  color:inherit!important;}
-div[data-testid="stRadio"] > div > label input{display:none!important;}
+  border-color:var(--acc)!important;}}
+div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"]{{
+  color:inherit!important;}}
+div[data-testid="stRadio"] > div > label input{{display:none!important;}}
 </style>""",
         unsafe_allow_html=True,
     )
