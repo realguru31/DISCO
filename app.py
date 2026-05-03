@@ -2,7 +2,9 @@
 DISCO – DesiHedge Investment Strategy & Capital Opportunities
 app.py — Streamlit dashboard
 """
+import io
 import re
+import urllib.request
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -135,6 +137,39 @@ def kget(kpis: dict, frag: str, key: str = "v") -> str:
         if frag.upper() in k:
             return d.get(key, "")
     return ""
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_ohlcv(ticker: str) -> list:
+    """Fetch daily OHLCV server-side from Stooq (free, no API key, no CORS issues).
+    Ticker format: NASDAQ:TW → TW.US on Stooq."""
+    try:
+        symbol = (ticker.split(":")[-1] + ".US").upper()
+        url = f"https://stooq.com/q/d/l/?s={symbol}&i=d"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            content = r.read().decode("utf-8")
+        df = pd.read_csv(io.StringIO(content))
+        # Stooq columns: Date, Open, High, Low, Close, Volume
+        df.columns = [c.strip() for c in df.columns]
+        if "Date" not in df.columns or "Close" not in df.columns:
+            return []
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.dropna(subset=["Open","High","Low","Close"])
+        df = df.sort_values("Date")
+        return [
+            {
+                "time":  int(row["Date"].timestamp()),
+                "open":  round(float(row["Open"]),  4),
+                "high":  round(float(row["High"]),  4),
+                "low":   round(float(row["Low"]),   4),
+                "close": round(float(row["Close"]), 4),
+            }
+            for _, row in df.iterrows()
+        ]
+    except Exception as e:
+        return []
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -441,7 +476,7 @@ def render_risk_params(kpis: dict):
 # ══════════════════════════════════════════════════════════════════
 # TABLE + CHART  — single component, Lightweight Charts, no radio hacks
 # ══════════════════════════════════════════════════════════════════
-def render_panel(positions: list, theme: str = "dark", height: int = 700):
+def render_panel(positions: list, ohlcv_map: dict, theme: str = "dark", height: int = 700):
     """
     One components.html block containing:
       - clickable positions table (left pane)
@@ -469,7 +504,8 @@ def render_panel(positions: list, theme: str = "dark", height: int = 700):
     chart_bdr  = "#1a2333" if d else "#e5e7eb"
     sma200_col = "#FFFFFF" if d else "#000000"
 
-    pos_js = _json.dumps(positions, default=str)
+    pos_js     = _json.dumps(positions, default=str)
+    ohlcv_js   = _json.dumps(ohlcv_map, default=str)
     tbl_h  = 38 + 44 * len(positions) + 20       # approx px for table
     comp_h = max(height, tbl_h + 60)
 
@@ -548,6 +584,7 @@ td:first-child{{text-align:left;font-weight:600;color:{t_acc};}}
 <script>
 // ── Data injected from Python ────────────────────────────────────
 const POSITIONS  = {pos_js};
+const ALL_OHLCV  = {ohlcv_js};   // pre-fetched server-side, no browser fetch
 const CHART_BG   = "{chart_bg}";
 const CHART_TXT  = "{chart_txt}";
 const CHART_GRID = "{chart_grid}";
@@ -606,7 +643,7 @@ function calcSMA(data, period) {{
   return out;
 }}
 
-async function loadChart(ticker, buyPx, stopPx) {{
+function loadChart(ticker, buyPx, stopPx) {{
   // Update header
   document.getElementById("ct").textContent = ticker;
   const bb = document.getElementById("bb"), bs = document.getElementById("bs");
@@ -649,36 +686,23 @@ async function loadChart(ticker, buyPx, stopPx) {{
     priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
   }});
 
-  // Fetch OHLCV — Yahoo Finance direct (no CORS issues on HTTPS)
-  try {{
-    const sym = ticker.includes(":") ? ticker.split(":")[1] : ticker;
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${{sym}}?interval=1d&range=2y`;
-    const res = await fetch(url);
-    const js  = await res.json();
-    const r   = js.chart.result[0];
-    const ts  = r.timestamp;
-    const q   = r.indicators.quote[0];
-
-    const ohlcv = ts.map((t, i) => ({{
-      time: t,
-      open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
-    }})).filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
-       .sort((a, b) => a.time - b.time);
-
-    candles.setData(ohlcv);
-    sma50s.setData(calcSMA(ohlcv, 50));
-    sma200s.setData(calcSMA(ohlcv, 200));
-
-    if (buyPx != null)  candles.createPriceLine({{ price: +buyPx,  color: "#00e676", lineWidth: 1,
-      lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "BUY" }});
-    if (stopPx != null) candles.createPriceLine({{ price: +stopPx, color: "#FF00FF", lineWidth: 1,
-      lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "STOP" }});
-
-    chart.timeScale().fitContent();
-
-  }} catch(e) {{
-    cc.innerHTML = `<div class="ph">⚠ Chart unavailable for ${{ticker}}<br><small style="font-size:10px;">${{e.message}}</small></div>`;
+  // Use pre-fetched OHLCV embedded from Python server (no browser fetch = no CSP/CORS issues)
+  const ohlcv = ALL_OHLCV[ticker] || [];
+  if (ohlcv.length === 0) {{
+    cc.innerHTML = `<div class="ph">⚠ No chart data for ${{ticker}}<br><small style="font-size:10px;">Data could not be loaded server-side</small></div>`;
+    return;
   }}
+
+  candles.setData(ohlcv);
+  sma50s.setData(calcSMA(ohlcv, 50));
+  sma200s.setData(calcSMA(ohlcv, 200));
+
+  if (buyPx != null)  candles.createPriceLine({{ price: +buyPx,  color: "#00e676", lineWidth: 1.5,
+    lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "BUY" }});
+  if (stopPx != null) candles.createPriceLine({{ price: +stopPx, color: "#FF00FF", lineWidth: 1.5,
+    lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "STOP" }});
+
+  chart.timeScale().fitContent();
 
   resizeObs = new ResizeObserver(() => {{
     const c = document.getElementById("cc");
@@ -776,8 +800,14 @@ def main():
 
     st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
 
+    # ── Pre-fetch OHLCV server-side for all positions (cached 1h)
+    ohlcv_map = {}
+    for _p in positions:
+        _tk = _p["Ticker"]
+        ohlcv_map[_tk] = get_ohlcv(_tk)
+
     # ── TABLE + CHART (single self-contained component)
-    render_panel(positions, theme=theme, height=700)
+    render_panel(positions, ohlcv_map, theme=theme, height=700)
 
 
 main()
