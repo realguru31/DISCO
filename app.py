@@ -2,9 +2,7 @@
 DISCO – DesiHedge Investment Strategy & Capital Opportunities
 app.py — Streamlit dashboard
 """
-import io
 import re
-import urllib.request
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -88,11 +86,7 @@ def parse_date(s):
 # ══════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
 def load_raw(url: str, bust: int = 0) -> pd.DataFrame:
-    """Download CSV directly then parse — no redirect/proxy issues."""
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        content = resp.read().decode("utf-8")
-    return pd.read_csv(io.StringIO(content), header=None, dtype=str).fillna("")
+    return pd.read_csv(url, header=None, dtype=str).fillna("")
 
 
 def get_positions(raw: pd.DataFrame) -> list:
