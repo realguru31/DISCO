@@ -150,8 +150,8 @@ def inject_css(theme: str):
         "redd": "rgba(255,51,102,.07)" if d else "rgba(185,28,28,.07)",
         "ylw":  "#ffd700" if d else "#b45309",
         "txt":  "#c9d1d9" if d else "#1e293b",
-        "txtm": "#7a8fa6" if d else "#475569",
-        "txtd": "#3d4f63" if d else "#94a3b8",
+        "txtm": "#8fa3bc" if d else "#475569",
+        "txtd": "#526a85" if d else "#94a3b8",
         "txth": "#f0f6ff" if d else "#0f172a",
         "inbg": "#07090f" if d else "#f8fafc",
         "btnc": "#000000" if d else "#ffffff",
@@ -203,9 +203,43 @@ details .streamlit-expanderContent{{
   background:var(--sf)!important;border:1px solid var(--bdrh)!important;
   border-top:none!important;border-radius:0 0 8px 8px!important;padding:22px!important;}}
 /* Scrollbar */
-::-webkit-scrollbar{{width:4px;height:4px}}
-::-webkit-scrollbar-track{{background:var(--bg)}}
-::-webkit-scrollbar-thumb{{background:var(--bdrh);border-radius:2px}}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--bdrh);border-radius:2px}
+/* HTML table (theme-aware, replaces st.dataframe) */
+.disco-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;}
+.disco-table th{background:var(--sf2)!important;color:var(--txtm)!important;
+  font-size:10px!important;font-weight:700!important;letter-spacing:.8px!important;
+  text-transform:uppercase!important;padding:9px 12px!important;
+  border-bottom:2px solid var(--bdrh)!important;text-align:right!important;}
+.disco-table th:first-child{text-align:left!important;}
+.disco-table td{padding:10px 12px!important;border-bottom:1px solid var(--bdr)!important;
+  color:var(--txth)!important;text-align:right!important;}
+.disco-table td:first-child{text-align:left!important;font-weight:600!important;
+  color:var(--acc)!important;}
+.disco-table tr:hover td{background:var(--sf2)!important;filter:brightness(1.04);}
+.disco-table tr.sel-row td{background:var(--sf2)!important;
+  border-left:3px solid var(--acc)!important;}
+.disco-table tr.pnl-pos td{background:rgba(0,230,118,0.06)!important;}
+.disco-table tr.pnl-neg td{background:rgba(255,51,102,0.06)!important;}
+.disco-table .pnl-pos-txt{color:#00e676!important;font-weight:700!important;}
+.disco-table .pnl-neg-txt{color:#ff3366!important;font-weight:700!important;}
+/* Radio (ticker selector) */
+div[data-testid="stRadio"]{padding:0!important;}
+div[data-testid="stRadio"] label{display:none!important;}
+div[data-testid="stRadio"] > div{gap:8px!important;}
+div[data-testid="stRadio"] > div > label{
+  background:var(--sf2)!important;border:1px solid var(--bdr)!important;
+  border-radius:6px!important;padding:6px 14px!important;
+  font-family:var(--mono)!important;font-size:12px!important;font-weight:600!important;
+  color:var(--txt)!important;cursor:pointer!important;display:inline-flex!important;
+  align-items:center!important;gap:6px!important;}
+div[data-testid="stRadio"] > div > label:has(input:checked){
+  background:var(--acc)!important;color:#000!important;
+  border-color:var(--acc)!important;}
+div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"]{
+  color:inherit!important;}
+div[data-testid="stRadio"] > div > label input{display:none!important;}
 </style>""",
         unsafe_allow_html=True,
     )
@@ -418,86 +452,72 @@ def render_risk_params(kpis: dict):
 
 
 # ══════════════════════════════════════════════════════════════════
-# POSITIONS TABLE
+# POSITIONS TABLE  (pure HTML — theme-aware, no st.dataframe)
 # ══════════════════════════════════════════════════════════════════
-def render_table(positions: list):
+def render_table(positions: list, selected_ticker: str | None):
     if not positions:
         st.info("No positions found in the sheet.")
         return None
 
-    df = pd.DataFrame(
-        [
-            {
-                "Ticker":     p["Ticker"],
-                "Shares":     int(p["Shares"]) if p["Shares"] else 0,
-                "Entry Px":   round(p["Entry Px"],  2) if p["Entry Px"]  else None,
-                "Entry Date": p["Entry Date"],
-                "Stop Px":    round(p["Stop Px"],   2) if p["Stop Px"]   else None,
-                "Curr Px":    round(p["Curr Px"],   2) if p["Curr Px"]   else None,
-                "P&L":        round(p["P&L"],       2) if p["P&L"] is not None else None,
-            }
-            for p in positions
-        ]
-    )
+    def _pnl_fmt(v):
+        if v is None: return "—"
+        return f"+{v:.2f}" if v > 0 else f"{v:.2f}"
 
-    def row_bg(row):
-        pnl = row["P&L"]
-        if isinstance(pnl, (int, float)) and pnl > 0:
-            return ["background-color: rgba(0,230,118,0.08)"] * len(row)
-        if isinstance(pnl, (int, float)) and pnl < 0:
-            return ["background-color: rgba(255,51,102,0.08)"] * len(row)
-        return [""] * len(row)
+    def _px(v):
+        return f"{v:.2f}" if v is not None else "—"
 
-    def pnl_color(v):
-        if isinstance(v, (int, float)) and v > 0:
-            return "color:#00e676;font-weight:700;"
-        if isinstance(v, (int, float)) and v < 0:
-            return "color:#ff3366;font-weight:700;"
-        return ""
-
-    def pnl_fmt(v):
-        if v is None:
-            return "—"
-        if isinstance(v, float):
-            return f"+{v:.2f}" if v > 0 else f"{v:.2f}"
-        return str(v)
-
-    styled = (
-        df.style
-        .apply(row_bg, axis=1)
-        .map(pnl_color, subset=["P&L"])
-        .format(
-            {
-                "Entry Px":  "{:.2f}",
-                "Stop Px":   "{:.2f}",
-                "Curr Px":   "{:.2f}",
-                "Shares":    "{:.0f}",
-                "P&L":       pnl_fmt,
-            },
-            na_rep="—",
+    # Build HTML rows
+    rows_html = ""
+    for p in positions:
+        pnl      = p["P&L"]
+        is_sel   = p["Ticker"] == selected_ticker
+        row_cls  = "sel-row " if is_sel else ""
+        row_cls += "pnl-pos" if (pnl or 0) > 0 else "pnl-neg" if (pnl or 0) < 0 else ""
+        pnl_cls  = "pnl-pos-txt" if (pnl or 0) > 0 else "pnl-neg-txt" if (pnl or 0) < 0 else ""
+        sel_dot  = ('<span style="color:var(--acc);margin-right:4px;">●</span>' if is_sel
+                    else '<span style="color:transparent;margin-right:4px;">●</span>')
+        rows_html += (
+            f'<tr class="{row_cls.strip()}">' +
+            f'<td>{sel_dot}{p["Ticker"]}</td>' +
+            f'<td>{int(p["Shares"]) if p["Shares"] else "—"}</td>' +
+            f'<td>{_px(p["Entry Px"])}</td>' +
+            f'<td>{p["Entry Date"]}</td>' +
+            f'<td>{_px(p["Stop Px"])}</td>' +
+            f'<td>{_px(p["Curr Px"])}</td>' +
+            f'<td class="{pnl_cls}">{_pnl_fmt(pnl)}</td>' +
+            f'</tr>'
         )
-    )
 
-    st.markdown(
-        '<div style="font-size:10px;font-weight:700;letter-spacing:1.5px;'
-        'text-transform:uppercase;color:var(--txtd);padding:10px 2px 8px;">'
-        "Open Positions — click any row to load chart →</div>",
-        unsafe_allow_html=True,
-    )
+    table_html = f"""
+<div style="margin-bottom:10px;">
+  <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--txtd);padding:10px 2px 10px;">Open Positions — select ticker below to chart ↓</div>
+  <table class="disco-table">
+    <thead><tr>
+      <th>Ticker</th><th>Shares</th><th>Entry Px</th>
+      <th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>P&amp;L</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>"""
+    st.markdown(table_html, unsafe_allow_html=True)
 
-    event = st.dataframe(
-        styled,
-        use_container_width=True,
-        height=min(440, 60 + 48 * len(positions)),
-        on_select="rerun",
-        selection_mode="single-row",
-        hide_index=True,
-        key="pos_df",
+    # Ticker selector
+    tickers = [p["Ticker"] for p in positions]
+    default_idx = tickers.index(selected_ticker) if selected_ticker in tickers else 0
+    chosen = st.radio(
+        "Select position",
+        tickers,
+        index=default_idx,
+        horizontal=True,
+        key="ticker_radio",
+        label_visibility="collapsed",
     )
-
-    if event.selection.rows:
-        return positions[event.selection.rows[0]]
-    return None
+    # Return full position dict for chosen ticker
+    for p in positions:
+        if p["Ticker"] == chosen:
+            return p
+    return positions[0]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -575,7 +595,7 @@ new TradingView.widget({{
   studies:[
     "Volume@tv-basicstudies",
     {{id:"MASimple@tv-basicstudies",inputs:{{length:50}}}},
-    {{id:"MASimple@tv-basicstudies",inputs:{{length:200}}}}
+    {{id:"MAExp@tv-basicstudies",inputs:{{length:200}}}}
   ],
   overrides:{{
     "mainSeriesProperties.candleStyle.upColor":         "rgba(30,144,255,0.6)",
@@ -586,10 +606,10 @@ new TradingView.widget({{
     "mainSeriesProperties.candleStyle.wickDownColor":   "rgba(255,0,255,0.70)"
   }},
   studies_overrides:{{
-    "moving average.plot.color.0":      "#1565C0",
-    "moving average.plot.linewidth.0":  1.5,
-    "moving average.plot.color.1":      "{sma200_col}",
-    "moving average.plot.linewidth.1":  1.5
+    "moving average.plot.color":             "#1565C0",
+    "moving average.plot.linewidth":         2,
+    "exponential moving average.plot.color": "{sma200_col}",
+    "exponential moving average.plot.linewidth": 1.5
   }}
 }});
 </script>"""
@@ -673,16 +693,24 @@ def main():
 
     st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
 
+    # ── Auto-select first position if nothing yet chosen
+    if positions and st.session_state.ticker is None:
+        st.session_state.ticker  = positions[0]["Ticker"]
+        st.session_state.buy_px  = positions[0]["Entry Px"]
+        st.session_state.stop_px = positions[0]["Stop Px"]
+
     # ── MAIN SPLIT: table left, chart right
     left, right = st.columns([5, 6], gap="small")
 
     with left:
         st.markdown('<div style="padding:0 4px 0 18px;">', unsafe_allow_html=True)
-        selected = render_table(positions)
+        selected = render_table(positions, st.session_state.ticker)
         if selected:
-            st.session_state.ticker  = selected["Ticker"]
-            st.session_state.buy_px  = selected["Entry Px"]
-            st.session_state.stop_px = selected["Stop Px"]
+            if selected["Ticker"] != st.session_state.ticker:
+                st.session_state.ticker  = selected["Ticker"]
+                st.session_state.buy_px  = selected["Entry Px"]
+                st.session_state.stop_px = selected["Stop Px"]
+                st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
