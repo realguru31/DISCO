@@ -517,7 +517,7 @@ def render_panel(positions: list, ohlcv_map: dict, theme: str = "dark", height: 
 html,body{{height:100%;background:{t_bg};color:{t_txt};font-family:'JetBrains Mono',monospace;font-size:13px;overflow:hidden;}}
 .wrap{{display:flex;height:{comp_h}px;}}
 /* ── TABLE ── */
-.tbl-panel{{width:42%;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid {t_bdr};}}
+.tbl-panel{{width:42%;min-width:200px;max-width:75%;flex-shrink:0;display:flex;flex-direction:column;}}.resizer{{width:5px;background:{t_bdr};cursor:col-resize;flex-shrink:0;transition:background .15s;}}.resizer:hover,.resizer.dragging{{background:{t_acc};}}
 .tbl-label{{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
   color:{t_hdr_col};padding:7px 12px;background:{t_surface};border-bottom:1px solid {t_bdr};flex-shrink:0;}}
 .tbl-wrap{{overflow-y:auto;flex:1;}}
@@ -560,6 +560,7 @@ td:first-child{{text-align:left;font-weight:600;color:{t_acc};}}
     <tbody id="tbl"></tbody>
   </table></div>
 </div>
+<div class="resizer" id="resizer"></div>
 <div class="chart-panel">
   <div class="chart-hdr">
     <span class="ct" id="ct">—</span>
@@ -716,6 +717,42 @@ if (POSITIONS.length > 0) {{
   const p = POSITIONS[0];
   loadChart(p["Ticker"], p["Entry Px"], p["Stop Px"]);
 }}
+
+// ── Resizer ───────────────────────────────────────────────────────
+(function() {{
+  const resizer  = document.getElementById("resizer");
+  const tblPanel = document.querySelector(".tbl-panel");
+  const wrap     = document.querySelector(".wrap");
+  let startX, startW;
+
+  resizer.addEventListener("mousedown", function(e) {{
+    startX = e.clientX;
+    startW = tblPanel.offsetWidth;
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function onMove(e) {{
+      const dx   = e.clientX - startX;
+      const newW = Math.min(Math.max(startW + dx, 200), wrap.offsetWidth * 0.75);
+      tblPanel.style.width = newW + "px";
+      // Resize chart after panel change
+      if (chartObj) {{
+        const cc = document.getElementById("cc");
+        chartObj.resize(cc.clientWidth, cc.clientHeight);
+      }}
+    }}
+    function onUp() {{
+      resizer.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }}
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }});
+}})();
 </script>
 </body></html>"""
 
