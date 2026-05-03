@@ -141,33 +141,29 @@ def kget(kpis: dict, frag: str, key: str = "v") -> str:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_ohlcv(ticker: str) -> list:
-    """Fetch daily OHLCV server-side from Stooq (free, no API key, no CORS issues).
-    Ticker format: NASDAQ:TW → TW.US on Stooq."""
+    """Fetch daily OHLCV via tvDatafeed (TradingView data, works in Streamlit)."""
     try:
-        symbol = (ticker.split(":")[-1] + ".US").upper()
-        url = f"https://stooq.com/q/d/l/?s={symbol}&i=d"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            content = r.read().decode("utf-8")
-        df = pd.read_csv(io.StringIO(content))
-        # Stooq columns: Date, Open, High, Low, Close, Volume
-        df.columns = [c.strip() for c in df.columns]
-        if "Date" not in df.columns or "Close" not in df.columns:
+        from tvDatafeed import TvDatafeed, Interval
+        parts    = ticker.split(":")
+        symbol   = parts[-1].strip()
+        exchange = parts[0].strip() if len(parts) > 1 else "NASDAQ"
+        tv = TvDatafeed()
+        df = tv.get_hist(symbol=symbol, exchange=exchange,
+                         interval=Interval.in_daily, n_bars=500)
+        if df is None or df.empty:
             return []
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.dropna(subset=["Open","High","Low","Close"])
-        df = df.sort_values("Date")
+        df = df.sort_index()
         return [
             {
-                "time":  int(row["Date"].timestamp()),
-                "open":  round(float(row["Open"]),  4),
-                "high":  round(float(row["High"]),  4),
-                "low":   round(float(row["Low"]),   4),
-                "close": round(float(row["Close"]), 4),
+                "time":  int(ts.timestamp()),
+                "open":  round(float(row["open"]),  4),
+                "high":  round(float(row["high"]),  4),
+                "low":   round(float(row["low"]),   4),
+                "close": round(float(row["close"]), 4),
             }
-            for _, row in df.iterrows()
+            for ts, row in df.iterrows()
         ]
-    except Exception as e:
+    except Exception:
         return []
 
 
