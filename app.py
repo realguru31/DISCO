@@ -220,10 +220,10 @@ details .streamlit-expanderContent{{
 .disco-table tr:hover td{background:var(--sf2)!important;filter:brightness(1.04);}
 .disco-table tr.sel-row td{background:var(--sf2)!important;
   border-left:3px solid var(--acc)!important;}
-.disco-table tr.pnl-pos td{background:rgba(0,230,118,0.06)!important;}
-.disco-table tr.pnl-neg td{background:rgba(255,51,102,0.06)!important;}
-.disco-table .pnl-pos-txt{color:#00e676!important;font-weight:700!important;}
-.disco-table .pnl-neg-txt{color:#ff3366!important;font-weight:700!important;}
+.disco-table tr.pnl-pos td{background:rgba(30,144,255,0.06)!important;}
+.disco-table tr.pnl-neg td{background:rgba(255,0,255,0.06)!important;}
+.disco-table .pnl-pos-txt{color:#1E90FF!important;font-weight:700!important;}
+.disco-table .pnl-neg-txt{color:#FF00FF!important;font-weight:700!important;}
 /* Radio (ticker selector) */
 div[data-testid="stRadio"]{padding:0!important;}
 div[data-testid="stRadio"] label{display:none!important;}
@@ -459,9 +459,14 @@ def render_table(positions: list, selected_ticker: str | None):
         st.info("No positions found in the sheet.")
         return None
 
-    def _pnl_fmt(v):
-        if v is None: return "—"
-        return f"+{v:.2f}" if v > 0 else f"{v:.2f}"
+    def _ret_pct(p):
+        """% return from entry price. Returns (display_str, float_value)."""
+        ep, cp = p.get("Entry Px"), p.get("Curr Px")
+        if ep and cp and ep != 0:
+            pct  = (cp - ep) / ep * 100
+            sign = "+" if pct >= 0 else ""
+            return f"{sign}{pct:.2f}%", pct
+        return "—", 0.0
 
     def _px(v):
         return f"{v:.2f}" if v is not None else "—"
@@ -469,11 +474,11 @@ def render_table(positions: list, selected_ticker: str | None):
     # Build HTML rows
     rows_html = ""
     for p in positions:
-        pnl      = p["P&L"]
+        ret_str, ret_val = _ret_pct(p)
         is_sel   = p["Ticker"] == selected_ticker
         row_cls  = "sel-row " if is_sel else ""
-        row_cls += "pnl-pos" if (pnl or 0) > 0 else "pnl-neg" if (pnl or 0) < 0 else ""
-        pnl_cls  = "pnl-pos-txt" if (pnl or 0) > 0 else "pnl-neg-txt" if (pnl or 0) < 0 else ""
+        row_cls += "pnl-pos" if ret_val > 0 else "pnl-neg" if ret_val < 0 else ""
+        pnl_cls  = "pnl-pos-txt" if ret_val > 0 else "pnl-neg-txt" if ret_val < 0 else ""
         sel_dot  = ('<span style="color:var(--acc);margin-right:4px;">●</span>' if is_sel
                     else '<span style="color:transparent;margin-right:4px;">●</span>')
         rows_html += (
@@ -484,7 +489,7 @@ def render_table(positions: list, selected_ticker: str | None):
             f'<td>{p["Entry Date"]}</td>' +
             f'<td>{_px(p["Stop Px"])}</td>' +
             f'<td>{_px(p["Curr Px"])}</td>' +
-            f'<td class="{pnl_cls}">{_pnl_fmt(pnl)}</td>' +
+            f'<td class="{pnl_cls}">{ret_str}</td>' +
             f'</tr>'
         )
 
@@ -495,7 +500,7 @@ def render_table(positions: list, selected_ticker: str | None):
   <table class="disco-table">
     <thead><tr>
       <th>Ticker</th><th>Shares</th><th>Entry Px</th>
-      <th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>P&amp;L</th>
+      <th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>Return %</th>
     </tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
