@@ -224,22 +224,8 @@ details .streamlit-expanderContent{{
 .disco-table tr.pnl-neg td{{background:rgba(255,0,255,0.06)!important;}}
 .disco-table .pnl-pos-txt{{color:#1E90FF!important;font-weight:700!important;}}
 .disco-table .pnl-neg-txt{{color:#FF00FF!important;font-weight:700!important;}}
-/* Radio (ticker selector) */
-div[data-testid="stRadio"]{{padding:0!important;}}
-div[data-testid="stRadio"] label{{display:none!important;}}
-div[data-testid="stRadio"] > div{{gap:8px!important;}}
-div[data-testid="stRadio"] > div > label{{
-  background:var(--sf2)!important;border:1px solid var(--bdr)!important;
-  border-radius:6px!important;padding:6px 14px!important;
-  font-family:var(--mono)!important;font-size:12px!important;font-weight:600!important;
-  color:var(--txt)!important;cursor:pointer!important;display:inline-flex!important;
-  align-items:center!important;gap:6px!important;}}
-div[data-testid="stRadio"] > div > label:has(input:checked){{
-  background:var(--acc)!important;color:#000!important;
-  border-color:var(--acc)!important;}}
-div[data-testid="stRadio"] > div > label > div[data-testid="stMarkdownContainer"]{{
-  color:inherit!important;}}
-div[data-testid="stRadio"] > div > label input{{display:none!important;}}
+/* Radio — completely hidden, used only as Streamlit state bridge */
+div[data-testid="stRadio"]{{display:none!important;}}
 </style>""",
         unsafe_allow_html=True,
     )
@@ -307,37 +293,33 @@ def _card(lbl, val, cls="", sub=""):
 
 
 def render_kpis(kpis: dict, positions: list):
-    total_pnl = pn(kget(kpis, "TOTAL PROFIT"))
-    risk_eq   = pn(kget(kpis, "RISK ON EQUITY"))
-    risk_gbp  = pn(kget(kpis, "CURRENT RISK ("))
-    port_size = pn(kget(kpis, "PORTFOLIO SIZE"))
-    leverage  = pn(kget(kpis, "LEVERAGE"))
-    new_pos   = kget(kpis, "NEW POSITION").upper().strip()
+    total_pnl   = pn(kget(kpis, "TOTAL PROFIT"))
+    initial_cap = pn(kget(kpis, "INITIAL INVESTMENT")) or pn(kget(kpis, "BROKERAGE")) or 1
+    risk_eq     = pn(kget(kpis, "RISK ON EQUITY"))
+    new_pos     = kget(kpis, "NEW POSITION").upper().strip()
 
-    risk_pct  = (risk_eq * 100 if risk_eq and abs(risk_eq) < 2 else risk_eq) if risk_eq else 0
-    risk_over = abs(risk_pct) > 33
-    lev_over  = (leverage or 0) > 2.5
+    # P&L as % of initial capital
+    pnl_pct     = (total_pnl / initial_cap * 100) if total_pnl is not None and initial_cap else None
+    pnl_sign    = "+" if (pnl_pct or 0) > 0 else ""
+    pnl_str     = f"{pnl_sign}{pnl_pct:.2f}%" if pnl_pct is not None else "—"
+
+    # Risk on equity (sheet stores as raw %, e.g. 4.91 means 4.91%)
+    risk_pct    = (risk_eq * 100 if risk_eq and abs(risk_eq) < 2 else risk_eq) if risk_eq else 0
+    risk_over   = abs(risk_pct) > 33
+    risk_str    = f"{abs(risk_pct):.1f}%" if risk_eq else "—"
 
     winners = sum(1 for p in positions if (p["P&L"] or 0) > 0)
     losers  = sum(1 for p in positions if (p["P&L"] or 0) < 0)
 
     cards = [
-        _card("Total P&L",
-              fmt(total_pnl, sign=True) if total_pnl is not None else "—",
-              "pos" if (total_pnl or 0) > 0 else "neg" if (total_pnl or 0) < 0 else "",
-              f"{winners} winner{'s' if winners!=1 else ''} · {losers} loser{'s' if losers!=1 else ''}"),
+        _card("Total Return",
+              pnl_str,
+              "pos" if (pnl_pct or 0) > 0 else "neg" if (pnl_pct or 0) < 0 else "",
+              f"{winners}W · {losers}L of {len(positions)} positions"),
         _card("Risk on Equity",
-              fmt_pct_abs(risk_eq) if risk_eq else "—",
-              "neg" if risk_over else "ok", "max 33%"),
-        _card("Current Risk £/$",
-              fmt(risk_gbp, 0) if risk_gbp else "—",
-              "", "total exposure"),
-        _card("Portfolio Size",
-              fmt(port_size, 0) if port_size else "—",
-              "", "market value"),
-        _card("Leverage",
-              f"{leverage:.2f}×" if leverage else "—",
-              "neg" if lev_over else "ok", "max 2.5×"),
+              risk_str,
+              "neg" if risk_over else "ok",
+              "limit 33%"),
         _card("New Position?",
               new_pos or "—",
               "ok" if new_pos == "YES" else "neg" if "NO" in new_pos else "",
@@ -345,7 +327,7 @@ def render_kpis(kpis: dict, positions: list):
     ]
     grid = "".join(cards)
     st.markdown(
-        f'<div style="display:flex;gap:10px;flex-wrap:wrap;padding:16px 20px 12px;">{grid}</div>',
+        f'<div style="display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px 12px;">{grid}</div>',
         unsafe_allow_html=True,
     )
 
@@ -452,7 +434,7 @@ def render_risk_params(kpis: dict):
 
 
 # ══════════════════════════════════════════════════════════════════
-# POSITIONS TABLE  (pure HTML — theme-aware, no st.dataframe)
+# POSITIONS TABLE  — clickable HTML rows + hidden radio state bridge
 # ══════════════════════════════════════════════════════════════════
 def render_table(positions: list, selected_ticker: str | None):
     if not positions:
@@ -460,69 +442,96 @@ def render_table(positions: list, selected_ticker: str | None):
         return None
 
     def _ret_pct(p):
-        """% return from entry price. Returns (display_str, float_value)."""
         ep, cp = p.get("Entry Px"), p.get("Curr Px")
         if ep and cp and ep != 0:
-            pct  = (cp - ep) / ep * 100
-            sign = "+" if pct >= 0 else ""
-            return f"{sign}{pct:.2f}%", pct
+            pct = (cp - ep) / ep * 100
+            return (f"+{pct:.2f}%" if pct >= 0 else f"{pct:.2f}%"), pct
         return "—", 0.0
 
-    def _px(v):
-        return f"{v:.2f}" if v is not None else "—"
+    def _px(v): return f"{v:.2f}" if v is not None else "—"
 
-    # Build HTML rows
+    tickers = [p["Ticker"] for p in positions]
+    def_idx = tickers.index(selected_ticker) if selected_ticker in tickers else 0
+
+    # Hidden radio — Streamlit state bridge (invisible, clicked by JS)
+    chosen = st.radio("sel", tickers, index=def_idx,
+                      key="ticker_radio", label_visibility="collapsed")
+
+    # Build themed table rows
     rows_html = ""
     for p in positions:
         ret_str, ret_val = _ret_pct(p)
-        is_sel   = p["Ticker"] == selected_ticker
-        row_cls  = "sel-row " if is_sel else ""
-        row_cls += "pnl-pos" if ret_val > 0 else "pnl-neg" if ret_val < 0 else ""
-        pnl_cls  = "pnl-pos-txt" if ret_val > 0 else "pnl-neg-txt" if ret_val < 0 else ""
-        sel_dot  = ('<span style="color:var(--acc);margin-right:4px;">●</span>' if is_sel
-                    else '<span style="color:transparent;margin-right:4px;">●</span>')
+        is_sel  = p["Ticker"] == (chosen or selected_ticker)
+        row_bg  = ("rgba(30,144,255,0.06)" if ret_val > 0 else
+                   "rgba(255,0,255,0.06)"  if ret_val < 0 else "transparent")
+        ret_col = ("#1E90FF" if ret_val > 0 else
+                   "#FF00FF" if ret_val < 0 else "inherit")
+        sel_style = ("border-left:3px solid var(--acc);background:var(--sf2)!important;"
+                     if is_sel else "border-left:3px solid transparent;")
+        dot = "●&nbsp;" if is_sel else "&nbsp;&nbsp;&nbsp;"
+        tk_col = "var(--acc)" if is_sel else "var(--txth)"
         rows_html += (
-            f'<tr class="{row_cls.strip()}">' +
-            f'<td>{sel_dot}{p["Ticker"]}</td>' +
+            f'<tr onclick="selectTicker(\'{p["Ticker"]}\')" ' +
+            f'style="cursor:pointer;background:{row_bg};{sel_style}">' +
+            f'<td style="color:{tk_col};font-weight:600;">{dot}{p["Ticker"]}</td>' +
             f'<td>{int(p["Shares"]) if p["Shares"] else "—"}</td>' +
             f'<td>{_px(p["Entry Px"])}</td>' +
             f'<td>{p["Entry Date"]}</td>' +
             f'<td>{_px(p["Stop Px"])}</td>' +
             f'<td>{_px(p["Curr Px"])}</td>' +
-            f'<td class="{pnl_cls}">{ret_str}</td>' +
+            f'<td style="color:{ret_col};font-weight:700;">{ret_str}</td>' +
             f'</tr>'
         )
 
     table_html = f"""
-<div style="margin-bottom:10px;">
-  <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
-    color:var(--txtd);padding:10px 2px 10px;">Open Positions — select ticker below to chart ↓</div>
-  <table class="disco-table">
-    <thead><tr>
-      <th>Ticker</th><th>Shares</th><th>Entry Px</th>
-      <th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>Return %</th>
-    </tr></thead>
-    <tbody>{rows_html}</tbody>
-  </table>
-</div>"""
-    st.markdown(table_html, unsafe_allow_html=True)
+<style>
+  .dt{{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:13px;}}
+  .dt th{{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
+    padding:9px 12px;border-bottom:2px solid #1a2333;text-align:right;color:#526a85;}}
+  .dt th:first-child{{text-align:left;}}
+  .dt td{{padding:10px 12px;border-bottom:1px solid #1a2333;text-align:right;color:#c9d1d9;}}
+  .dt td:first-child{{text-align:left;}}
+  .dt tr:hover td{{filter:brightness(1.15);}}
+  body{{background:transparent;margin:0;}}
+</style>
+<table class="dt">
+  <thead><tr>
+    <th>Ticker</th><th>Shares</th><th>Entry Px</th>
+    <th>Entry Date</th><th>Stop Px</th><th>Curr Px</th><th>Return %</th>
+  </tr></thead>
+  <tbody>{rows_html}</tbody>
+</table>
+<script>
+function selectTicker(ticker) {{
+  try {{
+    var radios = window.parent.document.querySelectorAll('[data-testid="stRadio"] input[type="radio"]');
+    for (var i = 0; i < radios.length; i++) {{
+      if (radios[i].value === ticker) {{
+        radios[i].click();
+        return;
+      }}
+    }}
+    // Fallback: click the label
+    var labels = window.parent.document.querySelectorAll('[data-testid="stRadio"] label');
+    for (var j = 0; j < labels.length; j++) {{
+      if (labels[j].innerText.trim() === ticker) {{
+        labels[j].click();
+        return;
+      }}
+    }}
+  }} catch(e) {{}}
+}}
+</script>"""
 
-    # Ticker selector
-    tickers = [p["Ticker"] for p in positions]
-    default_idx = tickers.index(selected_ticker) if selected_ticker in tickers else 0
-    chosen = st.radio(
-        "Select position",
-        tickers,
-        index=default_idx,
-        horizontal=True,
-        key="ticker_radio",
-        label_visibility="collapsed",
-    )
-    # Return full position dict for chosen ticker
+    row_h = 42
+    table_height = 38 + 36 + len(positions) * row_h + 8  # header + thead + rows + pad
+    components.html(table_html, height=table_height, scrolling=False)
+
     for p in positions:
         if p["Ticker"] == chosen:
             return p
     return positions[0]
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -535,17 +544,17 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
     bg         = "#0c1018"  if d else "#ffffff"
     hdr_bdr    = "#1a2333"  if d else "#e2e8f0"
     txt_hi     = "#f0f6ff"  if d else "#0f172a"
-    txt_dim    = "#7a8fa6"  if d else "#64748b"
+    txt_dim    = "#8fa3bc"  if d else "#64748b"
     buy_bg     = "rgba(0,230,118,.12)"   if d else "rgba(21,128,61,.10)"
     buy_col    = "#00e676"  if d else "#15803d"
     buy_bdr    = "rgba(0,230,118,.3)"    if d else "rgba(21,128,61,.25)"
-    stp_bg     = "rgba(255,51,102,.10)"  if d else "rgba(185,28,28,.08)"
-    stp_col    = "#ff3366"  if d else "#b91c1c"
-    stp_bdr    = "rgba(255,51,102,.3)"   if d else "rgba(185,28,28,.25)"
+    stp_bg     = "rgba(255,0,255,.08)"
+    stp_col    = "#FF00FF"
+    stp_bdr    = "rgba(255,0,255,.3)"
 
     if not ticker:
         ph_bg  = "#0c1018" if d else "#f8fafc"
-        ph_col = "#3d4f63" if d else "#94a3b8"
+        ph_col = "#526a85" if d else "#94a3b8"
         components.html(
             f'<div style="height:{height}px;display:flex;align-items:center;'
             f'justify-content:center;background:{ph_bg};border-radius:8px;">'
@@ -571,6 +580,70 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
         if stop_px else ""
     )
 
+    # ── Build JS separately to avoid f-string brace hell ──────────────
+    buy_line = ""
+    if buy_px:
+        buy_line = (
+            "chart.createPositionLine()"
+            f".setPrice({buy_px})"
+            f'.setText("BUY  {buy_px:.2f}")'
+            '.setLineColor("#00e676")'
+            ".setLineLength(50)"
+            ".setLineStyle(0)"
+            '.setBodyTextColor("#00e676")'
+            '.setBodyBorderColor("rgba(0,230,118,0.4)")'
+            '.setBodyBackgroundColor("rgba(0,230,118,0.08)")'
+            '.setQuantityBackgroundColor("transparent")'
+            '.setQuantityBorderColor("transparent")'
+            '.setQuantityTextColor("transparent");'
+        )
+    stop_line = ""
+    if stop_px:
+        stop_line = (
+            "chart.createPositionLine()"
+            f".setPrice({stop_px})"
+            f'.setText("STOP  {stop_px:.2f}")'
+            '.setLineColor("#FF00FF")'
+            ".setLineLength(50)"
+            ".setLineStyle(2)"
+            '.setBodyTextColor("#FF00FF")'
+            '.setBodyBorderColor("rgba(255,0,255,0.4)")'
+            '.setBodyBackgroundColor("rgba(255,0,255,0.08)")'
+            '.setQuantityBackgroundColor("transparent")'
+            '.setQuantityBorderColor("transparent")'
+            '.setQuantityTextColor("transparent");'
+        )
+
+    js = (
+        "var widget = new TradingView.widget({"
+        f'  container_id:"tvc_chart", autosize:true,'
+        f'  symbol:"{ticker}", interval:"D", timezone:"Etc/UTC",'
+        f'  theme:"{tv_theme}", style:"1", locale:"en",'
+        "  enable_publishing:false, allow_symbol_change:false,"
+        "  hide_side_toolbar:false, withdateranges:true, save_image:true,"
+        "  studies:["
+        '    "Volume@tv-basicstudies",'
+        '    {id:"MASimple@tv-basicstudies", inputs:{length:50},'
+        f'     overrides:{{"Plot.color":"#1565C0","Plot.linewidth":2}}}},'
+        '    {id:"MASimple@tv-basicstudies", inputs:{length:200},'
+        f'     overrides:{{"Plot.color":"{sma200_col}","Plot.linewidth":1.5}}}}'
+        "  ],"
+        "  overrides:{"
+        '    "mainSeriesProperties.candleStyle.upColor":         "rgba(30,144,255,0.6)",'
+        '    "mainSeriesProperties.candleStyle.downColor":       "rgba(255,0,255,0.6)",'
+        '    "mainSeriesProperties.candleStyle.borderUpColor":   "rgba(30,144,255,0.85)",'
+        '    "mainSeriesProperties.candleStyle.borderDownColor": "rgba(255,0,255,0.85)",'
+        '    "mainSeriesProperties.candleStyle.wickUpColor":     "rgba(30,144,255,0.70)",'
+        '    "mainSeriesProperties.candleStyle.wickDownColor":   "rgba(255,0,255,0.70)"'
+        "  }"
+        "});"
+        "widget.onChartReady(function() {"
+        "  var chart = widget.chart();"
+        + buy_line
+        + stop_line
+        + "});"
+    )
+
     html = f"""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Syne:wght@800&display=swap" rel="stylesheet">
 <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
@@ -588,38 +661,10 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
     <span style="color:rgba(255,0,255,.85);">▼</span> Magenta
   </span>
 </div>
-<div id="tvc" style="width:100%;height:{height - 44}px;"></div>
+<div id="tvc_chart" style="width:100%;height:{height - 44}px;"></div>
 <script src="https://s3.tradingview.com/tv.js"></script>
-<script>
-new TradingView.widget({{
-  container_id:"tvc", autosize:true,
-  symbol:"{ticker}", interval:"D", timezone:"Etc/UTC",
-  theme:"{tv_theme}", style:"1", locale:"en",
-  enable_publishing:false, allow_symbol_change:false,
-  hide_side_toolbar:false, withdateranges:true, save_image:true,
-  studies:[
-    "Volume@tv-basicstudies",
-    {{id:"MASimple@tv-basicstudies",inputs:{{length:50}}}},
-    {{id:"MAExp@tv-basicstudies",inputs:{{length:200}}}}
-  ],
-  overrides:{{
-    "mainSeriesProperties.candleStyle.upColor":         "rgba(30,144,255,0.6)",
-    "mainSeriesProperties.candleStyle.downColor":       "rgba(255,0,255,0.6)",
-    "mainSeriesProperties.candleStyle.borderUpColor":   "rgba(30,144,255,0.85)",
-    "mainSeriesProperties.candleStyle.borderDownColor": "rgba(255,0,255,0.85)",
-    "mainSeriesProperties.candleStyle.wickUpColor":     "rgba(30,144,255,0.70)",
-    "mainSeriesProperties.candleStyle.wickDownColor":   "rgba(255,0,255,0.70)"
-  }},
-  studies_overrides:{{
-    "moving average.plot.color":             "#1565C0",
-    "moving average.plot.linewidth":         2,
-    "exponential moving average.plot.color": "{sma200_col}",
-    "exponential moving average.plot.linewidth": 1.5
-  }}
-}});
-</script>"""
+<script>{js}</script>"""
     components.html(html, height=height + 4)
-
 
 # ══════════════════════════════════════════════════════════════════
 # MAIN
