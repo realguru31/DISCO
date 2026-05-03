@@ -7,7 +7,12 @@ import re
 import urllib.request
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
+import warnings
 from datetime import datetime
+
+# Suppress Streamlit components deprecation until official migration path is available
+warnings.filterwarnings("ignore", message=".*st.components.v1.html.*")
 
 # ══════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -540,7 +545,7 @@ function selectTicker(ticker) {{
 
     row_h = 42
     table_height = 38 + 36 + len(positions) * row_h + 8  # header + thead + rows + pad
-    st.html(f'<div style="height:{table_height}px;overflow:hidden;">' + table_html + "</div>")
+    components.html(table_html, height=table_height, scrolling=False)
 
     for p in positions:
         if p["Ticker"] == chosen:
@@ -570,14 +575,15 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
     if not ticker:
         ph_bg  = "#0c1018" if d else "#f8fafc"
         ph_col = "#526a85" if d else "#94a3b8"
-        st.html(
+        components.html(
             f'<div style="height:{height}px;display:flex;align-items:center;'
             f'justify-content:center;background:{ph_bg};border-radius:8px;">'
             f'<div style="text-align:center;">'
             f'<div style="font-size:40px;opacity:.18;">📈</div>'
             f'<div style="font-size:14px;color:{ph_col};margin-top:14px;'
             f'font-family:Inter,sans-serif;letter-spacing:.5px;">'
-            f'Select a position to view chart</div></div></div>'
+            f'Select a position to view chart</div></div></div>',
+            height=height + 4,
         )
         return
 
@@ -678,7 +684,7 @@ def render_chart(ticker, buy_px, stop_px, theme: str, height: int = 700):
 <div id="tvc_chart" style="width:100%;height:{height - 44}px;"></div>
 <script src="https://s3.tradingview.com/tv.js"></script>
 <script>{js}</script>"""
-    st.html(f'<div style="height:{height+4}px;">' + html + "</div>")
+    components.html(html, height=height + 4)
 
 # ══════════════════════════════════════════════════════════════════
 # MAIN
